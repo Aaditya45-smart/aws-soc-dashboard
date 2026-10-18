@@ -1,0 +1,12 @@
+[
+    {
+        "alert_id": "ALERT-001",
+        "alert_type": "Repeated Failed Login",
+        "source_ip": "192.0.2.10",
+        "failed_attempts": 3,
+        "severity": "HIGH",
+        "status": "OPEN",
+        "detected_at": "2026-10-18T18:47:38.470065+00:00",
+        "recommendation": "Review authentication events and verify the activity. Do not block an IP based on this sample alone."
+    }
+]

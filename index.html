@@ -1,0 +1,418 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AWS SOC Dashboard</title>
+
+<style>
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #0b1220;
+  color: #e5edf8;
+  font-family: Arial, sans-serif;
+}
+
+header {
+  background: #111c2e;
+  border-bottom: 1px solid #29364a;
+  padding: 22px;
+}
+
+header h1 { margin: 0 0 8px; }
+header p { color: #9eafc7; margin: 0; }
+
+main {
+  max-width: 1400px;
+  margin: auto;
+  padding: 24px;
+}
+
+.notice {
+  background: #332811;
+  color: #fbbf24;
+  border-radius: 8px;
+  padding: 13px;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 15px;
+}
+
+.card, .panel {
+  background: #111c2e;
+  border: 1px solid #29364a;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.card p { color: #9eafc7; margin-top: 0; }
+.number { font-size: 32px; font-weight: bold; }
+.blue { color: #60a5fa; }
+.red { color: #fb7185; }
+.yellow { color: #fbbf24; }
+.green { color: #4ade80; }
+
+.panel { margin-top: 22px; }
+.panel h2 { font-size: 19px; }
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+input, select, button {
+  padding: 11px;
+  border-radius: 7px;
+  border: 1px solid #35445a;
+  background: #0b1220;
+  color: #e5edf8;
+}
+
+input { min-width: 190px; }
+
+button {
+  background: #2563eb;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover { background: #1d4ed8; }
+
+.table-wrap { overflow-x: auto; }
+
+table {
+  width: 100%;
+  min-width: 850px;
+  border-collapse: collapse;
+}
+
+th, td {
+  padding: 13px 10px;
+  text-align: left;
+  border-bottom: 1px solid #29364a;
+  font-size: 13px;
+}
+
+th { color: #9eafc7; }
+
+.pill {
+  padding: 5px 8px;
+  border-radius: 5px;
+  font-weight: bold;
+  font-size: 11px;
+}
+
+.CRITICAL { background: #54212b; color: #fda4af; }
+.HIGH { background: #542f18; color: #fdba74; }
+.MEDIUM { background: #443b18; color: #fde047; }
+.LOW { background: #173b31; color: #86efac; }
+
+.small-button {
+  padding: 8px 10px;
+  margin-top: 4px;
+}
+
+#summary { line-height: 1.7; color: #cbd5e1; }
+
+footer {
+  padding: 25px;
+  text-align: center;
+  color: #8293aa;
+  font-size: 12px;
+}
+
+@media (max-width: 800px) {
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  main { padding: 14px; }
+}
+
+@media (max-width: 450px) {
+  .cards { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+
+<body>
+<header>
+  <h1>🛡 AWS Security Operations Center</h1>
+  <p>Security Event Monitoring and Incident Management</p>
+</header>
+
+<main>
+  <div class="notice">
+    DEMO MODE — Local sample logs, not live AWS security alerts.
+  </div>
+
+  <section class="cards">
+    <div class="card">
+      <p>Total Security Events</p>
+      <div class="number blue" id="total">0</div>
+    </div>
+
+    <div class="card">
+      <p>Critical Alerts</p>
+      <div class="number red" id="critical">0</div>
+    </div>
+
+    <div class="card">
+      <p>High Severity Alerts</p>
+      <div class="number yellow" id="high">0</div>
+    </div>
+
+    <div class="card">
+      <p>Open Incidents</p>
+      <div class="number green" id="open">0</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Security Events</h2>
+
+    <div class="toolbar">
+      <input id="search" placeholder="Search events or IP..." />
+
+      <select id="severity">
+        <option value="ALL">All severities</option>
+        <option value="CRITICAL">Critical</option>
+        <option value="HIGH">High</option>
+        <option value="MEDIUM">Medium</option>
+        <option value="LOW">Low</option>
+      </select>
+
+      <button onclick="resetFilters()">Reset Filters</button>
+      <button onclick="loadEvents()">Refresh Events</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Event ID</th>
+            <th>Event Type</th>
+            <th>Source IP</th>
+            <th>Severity</th>
+            <th>Status</th>
+            <th>Investigation</th>
+          </tr>
+        </thead>
+        <tbody id="events">
+          <tr><td colspan="6">Loading events...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Incident Summary</h2>
+    <p id="summary">Connecting to the local SOC backend...</p>
+    <button onclick="downloadReport()">Download CSV Report</button>
+  </section>
+</main>
+
+<footer>AWS SOC Dashboard | Educational Project</footer>
+
+<script>
+let sampleEvents = [];
+
+async function loadEvents() {
+  const summary = document.getElementById("summary");
+
+  try {
+    const response = await fetch("/api/events");
+
+    if (!response.ok) {
+      throw new Error("Backend returned HTTP " + response.status);
+    }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data)) {
+      throw new Error(data.error || "Invalid event data");
+    }
+
+    sampleEvents = data;
+    updateDashboard();
+
+  } catch (error) {
+    summary.textContent =
+      "Unable to connect. Start server.py and open http://127.0.0.1:8000";
+    console.error("SOC connection error:", error);
+  }
+}
+
+function updateDashboard() {
+  document.getElementById("total").textContent = sampleEvents.length;
+
+  document.getElementById("critical").textContent =
+    sampleEvents.filter(e => e.severity === "CRITICAL").length;
+
+  document.getElementById("high").textContent =
+    sampleEvents.filter(e => e.severity === "HIGH").length;
+
+  document.getElementById("open").textContent =
+    sampleEvents.filter(e =>
+      e.status === "Open" || e.status === "Investigating"
+    ).length;
+
+  const highRisk = sampleEvents.filter(e =>
+    e.severity === "HIGH" || e.severity === "CRITICAL"
+  ).length;
+
+  document.getElementById("summary").textContent =
+    `${sampleEvents.length} events loaded. ${highRisk} high/critical events require review. Check event details before deciding whether activity is malicious.`;
+
+  renderEvents();
+}
+
+function renderEvents() {
+  const query = document.getElementById("search").value.toLowerCase();
+  const severity = document.getElementById("severity").value;
+
+  const filtered = sampleEvents.filter(e => {
+    const matchesSearch = Object.values(e).some(value =>
+      String(value).toLowerCase().includes(query)
+    );
+
+    const matchesSeverity =
+      severity === "ALL" || e.severity === severity;
+
+    return matchesSearch && matchesSeverity;
+  });
+
+  document.getElementById("events").innerHTML =
+    filtered.map(e => `
+      <tr>
+        <td>${escapeHTML(e.id)}</td>
+        <td>${escapeHTML(e.type)}</td>
+        <td>${escapeHTML(e.source)}</td>
+        <td>
+          <span class="pill ${escapeHTML(e.severity)}">
+            ${escapeHTML(e.severity)}
+          </span>
+        </td>
+        <td>${escapeHTML(e.status)}</td>
+        <td>
+          <select id="status-${escapeHTML(e.id)}">
+            ${["Open", "Investigating", "Closed"].map(status =>
+              `<option value="${status}" ${e.status === status ? "selected" : ""}>${status}</option>`
+            ).join("")}
+          </select>
+          <button class="small-button"
+            onclick="changeStatus('${escapeHTML(e.id)}')">
+            Save
+          </button>
+          <button class="small-button"
+            onclick="showDetails('${escapeHTML(e.id)}')">
+            Details
+          </button>
+        </td>
+      </tr>
+    `).join("") ||
+    '<tr><td colspan="6">No matching events found.</td></tr>';
+}
+
+function escapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, character => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[character]);
+}
+
+async function changeStatus(id) {
+  const select = document.getElementById("status-" + id);
+  if (!select) return;
+
+  try {
+    const response = await fetch("/api/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status: select.value })
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.error || "Could not save status");
+    }
+
+    await loadEvents();
+    alert("Incident status saved: " + result.status);
+
+  } catch (error) {
+    alert("Status update failed. Check that server.py is running.");
+    console.error(error);
+  }
+}
+
+function showDetails(id) {
+  const event = sampleEvents.find(e => e.id === id);
+  if (!event) return;
+
+  alert(
+    "INCIDENT DETAILS\n\n" +
+    "Event ID: " + event.id + "\n" +
+    "Event Type: " + event.type + "\n" +
+    "Source IP: " + event.source + "\n" +
+    "Username: " + (event.username || "Unknown") + "\n" +
+    "Result: " + (event.result || "Unknown") + "\n" +
+    "Severity: " + event.severity + "\n" +
+    "Status: " + event.status + "\n\n" +
+    "Investigation: Review related events and verify whether the activity is authorized."
+  );
+}
+
+function resetFilters() {
+  document.getElementById("search").value = "";
+  document.getElementById("severity").value = "ALL";
+  renderEvents();
+}
+
+function downloadReport() {
+  const headers = [
+    "Event ID", "Event Type", "Source IP",
+    "Username", "Result", "Severity", "Status"
+  ];
+
+  const rows = sampleEvents.map(e => [
+    e.id, e.type, e.source, e.username || "",
+    e.result || "", e.severity, e.status
+  ]);
+
+  const csv = [headers, ...rows].map(row =>
+    row.map(value =>
+      '"' + String(value ?? "").replace(/"/g, '""') + '"'
+    ).join(",")
+  ).join("\r\n");
+
+  const blob = new Blob(["\uFEFF" + csv], {
+    type: "text/csv;charset=utf-8"
+  });
+
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "soc-security-report.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById("search").addEventListener("input", renderEvents);
+document.getElementById("severity").addEventListener("change", renderEvents);
+
+loadEvents();
+</script>
+</body>
+</html>

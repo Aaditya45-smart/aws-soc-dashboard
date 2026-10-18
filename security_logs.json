@@ -1,0 +1,31 @@
+
+[
+  {
+    "event_id": "EVT-001",
+    "event_type": "FailedLogin",
+    "source_ip": "192.0.2.10",
+    "username": "admin",
+    "status": "FAILED"
+  },
+  {
+    "event_id": "EVT-002",
+    "event_type": "FailedLogin",
+    "source_ip": "192.0.2.10",
+    "username": "admin",
+    "status": "FAILED"
+  },
+  {
+    "event_id": "EVT-003",
+    "event_type": "FailedLogin",
+    "source_ip": "192.0.2.10",
+    "username": "admin",
+    "status": "FAILED"
+  },
+  {
+    "event_id": "EVT-004",
+    "event_type": "Login",
+    "source_ip": "192.0.2.20",
+    "username": "student",
+    "status": "SUCCESS"
+  }
+]
