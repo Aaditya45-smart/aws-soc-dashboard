@@ -1,7 +1,9 @@
 
 import json
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+import os
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+from urllib.parse import urlsplit
 
 BASE_DIR = Path(__file__).resolve().parent
 ALLOWED_STATUSES = {"Open", "Investigating", "Closed"}
@@ -21,66 +23,85 @@ def write_json(path, data):
 
 
 class SOCHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(BASE_DIR), **kwargs)
-
     def send_json(self, data, status=200):
         body = json.dumps(data).encode("utf-8")
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path != "/api/events":
-            return super().do_GET()
+        route = urlsplit(self.path).path
 
-        try:
-            logs = read_json(BASE_DIR / "security_logs.json", [])
-            alerts = read_json(BASE_DIR / "alerts.json", [])
-            statuses = read_json(BASE_DIR / "incident_status.json", {})
+        if route == "/api/events":
+            try:
+                logs = read_json(BASE_DIR / "security_logs.json", [])
+                alerts = read_json(BASE_DIR / "alerts.json", [])
+                statuses = read_json(BASE_DIR / "incident_status.json", {})
 
-            high_risk_ips = {
-                alert["source_ip"] for alert in alerts
-                if alert.get("severity") in {"HIGH", "CRITICAL"}
-            }
+                high_risk_ips = {
+                    alert["source_ip"]
+                    for alert in alerts
+                    if alert.get("severity") in {"HIGH", "CRITICAL"}
+                }
 
-            events = []
+                events = []
 
-            for log in logs:
-                ip = log.get("source_ip", "Unknown")
-                is_suspicious = ip in high_risk_ips
-                default_status = "Open" if is_suspicious else "Closed"
+                for log in logs:
+                    event_id = log.get("event_id", "UNKNOWN")
+                    ip = log.get("source_ip", "Unknown")
+                    suspicious = ip in high_risk_ips
+                    result = log.get("status", "Unknown")
 
-                events.append({
-                    "id": log.get("event_id", "UNKNOWN"),
-                    "type": log.get("event_type", "Unknown"),
-                    "source": ip,
-                    "username": log.get("username", "Unknown"),
-                    "result": log.get("status", "Unknown"),
-                    "severity": "HIGH" if is_suspicious else (
-                        "MEDIUM" if log.get("status") == "FAILED" else "LOW"
-                    ),
-                    "status": statuses.get(
-                        log.get("event_id"), default_status
-                    )
-                })
+                    events.append({
+                        "id": event_id,
+                        "type": log.get("event_type", "Unknown"),
+                        "source": ip,
+                        "username": log.get("username", "Unknown"),
+                        "result": result,
+                        "severity": (
+                            "HIGH" if suspicious
+                            else "MEDIUM" if result == "FAILED"
+                            else "LOW"
+                        ),
+                        "status": statuses.get(
+                            event_id,
+                            "Open" if suspicious else "Closed"
+                        )
+                    })
 
-            return self.send_json(events)
+                return self.send_json(events)
 
-        except (OSError, ValueError, KeyError, TypeError) as error:
-            print("Read error:", error)
-            return self.send_json({"error": "Unable to read incident data"}, 500)
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                print("Read error:", error)
+                return self.send_json(
+                    {"error": "Unable to read incident data"}, 500
+                )
+
+        # Publicly serve only the dashboard page.
+        if route in {"/", "/index.html"}:
+            try:
+                page = (BASE_DIR / "index.html").read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
+            except OSError:
+                self.send_json({"error": "Dashboard page not found"}, 404)
+            return
+
+        # Do not expose Python or JSON files to website visitors.
+        return self.send_json({"error": "Not found"}, 404)
 
     def do_POST(self):
-        if self.path != "/api/status":
+        if urlsplit(self.path).path != "/api/status":
             return self.send_json({"error": "Not found"}, 404)
 
         try:
             length = int(self.headers.get("Content-Length", "0"))
-
             if length < 1 or length > 4096:
                 return self.send_json({"error": "Invalid request size"}, 400)
 
@@ -88,7 +109,10 @@ class SOCHandler(SimpleHTTPRequestHandler):
             event_id = payload.get("id")
             status = payload.get("status")
 
-            if not isinstance(event_id, str) or status not in ALLOWED_STATUSES:
+            if (
+                not isinstance(event_id, str)
+                or status not in ALLOWED_STATUSES
+            ):
                 return self.send_json({"error": "Invalid ID or status"}, 400)
 
             logs = read_json(BASE_DIR / "security_logs.json", [])
@@ -110,13 +134,20 @@ class SOCHandler(SimpleHTTPRequestHandler):
 
         except (OSError, ValueError, TypeError) as error:
             print("Update error:", error)
-            return self.send_json({"error": "Unable to update status"}, 500)
+            return self.send_json(
+                {"error": "Unable to update status"}, 500
+            )
+
+    def log_message(self, format, *args):
+        # Keep normal request logging in Render logs.
+        super().log_message(format, *args)
 
 
 if __name__ == "__main__":
-    server = HTTPServer(("127.0.0.1", 8000), SOCHandler)
-    print("SOC Dashboard: http://127.0.0.1:8000")
-    print("Local demo server. Do not expose it to the public internet.")
+    port = int(os.environ.get("PORT", "8000"))
+    server = ThreadingHTTPServer(("0.0.0.0", port), SOCHandler)
+
+    print(f"SOC Dashboard server running on port {port}")
 
     try:
         server.serve_forever()
